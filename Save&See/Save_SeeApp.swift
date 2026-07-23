@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Observation
 
 // MARK: - Model
 
@@ -44,9 +43,8 @@ extension String {
 
 // MARK: - Store
 
-@Observable @MainActor
-final class EntryStore {
-    var entries: [Entry] = []
+final class EntryStore: ObservableObject {
+    @Published var entries: [Entry] = []
     private let filesDir: URL
     private let metaFile: URL
 
@@ -102,42 +100,55 @@ final class EntryStore {
 
 // MARK: - App Delegate
 
-@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
+    private var eventMonitor: Any?
     private var appWindow: NSWindow?
     let store = EntryStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let hc = NSHostingController(rootView: MenuBarView().environment(store))
+        let hc = NSHostingController(rootView: MenuBarView().environmentObject(store))
+        hc.preferredContentSize = NSSize(width: 300, height: 420)
+
         popover = NSPopover()
-        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 300, height: 420)
+        popover.behavior = .applicationDefined
+        popover.animates = true
         popover.contentViewController = hc
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "doc.on.clipboard",
-                                            accessibilityDescription: "Save & See")
-        statusItem.button?.action = #selector(toggle)
-        statusItem.button?.target = self
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "doc.on.clipboard",
+                                   accessibilityDescription: "Save & See")
+            button.action = #selector(togglePopover(_:))
+            button.target = self
+        }
+
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.popover.isShown else { return }
+                self.popover.performClose(nil)
+            }
+        }
     }
 
-    @objc func toggle() {
+    @objc func togglePopover(_ sender: AnyObject?) {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
 
     func openAppWindow() {
         popover.performClose(nil)
         if appWindow == nil {
-            let hc = NSHostingController(rootView: AppWindowView().environment(store))
+            let hc = NSHostingController(rootView: AppWindowView().environmentObject(store))
             let win = NSWindow(contentViewController: hc)
             win.title = "Save & See"
             win.styleMask = [.titled, .closable, .resizable, .miniaturizable]
@@ -155,6 +166,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         appWindow = nil
         NSApp.setActivationPolicy(.accessory)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
 }
 

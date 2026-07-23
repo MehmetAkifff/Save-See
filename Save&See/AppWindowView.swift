@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 struct AppWindowView: View {
-    @Environment(EntryStore.self) private var store
+    @EnvironmentObject private var store: EntryStore
     @State private var selection: Entry.ID?
     @State private var showAddText = false
     @State private var searchText = ""
@@ -42,7 +42,7 @@ struct AppWindowView: View {
             }
         } detail: {
             if let id = selection, let entry = store.entries.first(where: { $0.id == id }) {
-                EntryDetailView(entry: entry).environment(store)
+                EntryDetailView(entry: entry).environmentObject(store)
             } else {
                 ContentUnavailableView(
                     "No Selection",
@@ -52,7 +52,7 @@ struct AppWindowView: View {
             }
         }
         .sheet(isPresented: $showAddText) {
-            AddTextSheet().environment(store)
+            AddTextSheet().environmentObject(store)
         }
         .dropDestination(for: URL.self) { urls, _ in
             for url in urls where url.isFileURL {
@@ -105,7 +105,7 @@ struct AppEntryRow: View {
 
 struct EntryDetailView: View {
     let entry: Entry
-    @Environment(EntryStore.self) private var store
+    @EnvironmentObject private var store: EntryStore
     @State private var copied = false
 
     var body: some View {
@@ -199,7 +199,7 @@ struct EntryDetailView: View {
 // MARK: - Add Text Sheet
 
 struct AddTextSheet: View {
-    @Environment(EntryStore.self) private var store
+    @EnvironmentObject private var store: EntryStore
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var value = ""

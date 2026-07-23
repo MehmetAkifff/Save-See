@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 struct MenuBarView: View {
-    @Environment(EntryStore.self) private var store
+    @EnvironmentObject private var store: EntryStore
     @State private var showAdd = false
     @State private var newName = ""
     @State private var newValue = ""
@@ -73,12 +73,12 @@ struct MenuBarView: View {
         } else {
             List {
                 ForEach(store.entries) { entry in
-                    MenuBarEntryRow(entry: entry, copiedID: $copiedID, store: store)
+                    MenuBarEntryRow(entry: entry, copiedID: $copiedID)
                 }
                 .onDelete { store.remove(at: $0) }
             }
             .listStyle(.plain)
-            .frame(maxHeight: 360)
+            .frame(maxHeight: 340)
         }
     }
 
@@ -104,7 +104,7 @@ struct MenuBarView: View {
 struct MenuBarEntryRow: View {
     let entry: Entry
     @Binding var copiedID: UUID?
-    let store: EntryStore
+    @EnvironmentObject private var store: EntryStore
 
     private var copied: Bool { copiedID == entry.id }
 
