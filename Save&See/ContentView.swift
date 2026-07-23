@@ -127,7 +127,7 @@ struct SnippetRow: View {
             }
             Spacer()
             Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc")
-                .foregroundStyle(copied ? .green : .tertiary)
+                .foregroundStyle(copied ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
                 .font(.footnote)
                 .animation(.easeInOut(duration: 0.2), value: copied)
         }
