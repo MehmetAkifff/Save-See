@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          xcodebuild \
+            -project "Save&See.xcodeproj" \
+            -scheme "Save&See" \
+            -configuration Release \
+            -derivedDataPath DerivedData \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package
+        run: |
+          APP=$(find DerivedData -name "Save&See.app" -type d | head -1)
+          ditto -c -k --sequesterRsrc --keepParent "$APP" Save-See.zip
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Save-See.zip
+          body: |
+            ## Install
+            1. Download `Save-See.zip` and extract
+            2. Move `Save&See.app` to `/Applications`
+            3. First launch: **right-click → Open** (Gatekeeper bypass for unsigned build)
+
+            > To build a signed version, clone the repo and build with Xcode using your Apple Developer account.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
