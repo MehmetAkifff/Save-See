@@ -2,65 +2,124 @@ import SwiftUI
 import AppKit
 import Observation
 
-@Observable
-@MainActor
-final class SnippetStore {
-    var snippets: [Snippet] = []
-    private let key = "snippets"
+// MARK: - Model
 
-    init() { load() }
+struct Entry: Identifiable, Codable {
+    var id = UUID()
+    var name: String
+    var kind: Kind
+    var createdAt = Date()
 
-    func add(name: String, value: String) {
-        snippets.append(Snippet(
-            name: name.trimmingCharacters(in: .whitespaces),
-            value: value.trimmingCharacters(in: .whitespaces)
-        ))
+    enum Kind: Codable {
+        case text(String)
+        case file(original: String, stored: String)
+    }
+
+    var systemImage: String {
+        switch kind {
+        case .text: return "doc.on.clipboard"
+        case .file(let original, _):
+            switch URL(fileURLWithPath: original).pathExtension.lowercased() {
+            case "jpg", "jpeg", "png", "gif", "webp", "heic", "tiff", "bmp", "svg": return "photo"
+            case "pdf": return "doc.richtext"
+            case "mp4", "mov", "avi", "mkv", "m4v": return "film"
+            case "mp3", "m4a", "wav", "aac", "flac": return "music.note"
+            case "zip", "gz", "tar", "rar", "7z": return "doc.zipper"
+            case "txt", "md", "rtf": return "doc.text"
+            default: return "doc"
+            }
+        }
+    }
+}
+
+extension Entry.Kind {
+    var isText: Bool { if case .text = self { return true }; return false }
+    var textValue: String? { if case .text(let v) = self { return v }; return nil }
+    var originalFileName: String? { if case .file(let o, _) = self { return o }; return nil }
+}
+
+extension String {
+    var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+}
+
+// MARK: - Store
+
+@Observable @MainActor
+final class EntryStore {
+    var entries: [Entry] = []
+    private let filesDir: URL
+    private let metaFile: URL
+
+    init() {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Save-See", isDirectory: true)
+        filesDir = base.appendingPathComponent("files", isDirectory: true)
+        metaFile = base.appendingPathComponent("entries.json")
+        try? FileManager.default.createDirectory(at: filesDir, withIntermediateDirectories: true)
+        load()
+    }
+
+    func addText(name: String, value: String) {
+        entries.insert(Entry(name: name.trimmed, kind: .text(value.trimmed)), at: 0)
+        save()
+    }
+
+    func addFile(name: String, sourceURL: URL) throws {
+        let ext = sourceURL.pathExtension
+        let stored = UUID().uuidString + (ext.isEmpty ? "" : "." + ext)
+        try FileManager.default.copyItem(at: sourceURL, to: filesDir.appendingPathComponent(stored))
+        entries.insert(Entry(name: name, kind: .file(original: sourceURL.lastPathComponent, stored: stored)), at: 0)
         save()
     }
 
     func remove(at offsets: IndexSet) {
-        snippets.remove(atOffsets: offsets)
+        for i in offsets {
+            if case .file(_, let stored) = entries[i].kind {
+                try? FileManager.default.removeItem(at: filesDir.appendingPathComponent(stored))
+            }
+        }
+        entries.remove(atOffsets: offsets)
         save()
     }
 
+    func fileURL(for entry: Entry) -> URL? {
+        guard case .file(_, let stored) = entry.kind else { return nil }
+        return filesDir.appendingPathComponent(stored)
+    }
+
     private func save() {
-        guard let data = try? JSONEncoder().encode(snippets) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        try? JSONEncoder().encode(entries).write(to: metaFile)
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let items = try? JSONDecoder().decode([Snippet].self, from: data)
+        guard let data = try? Data(contentsOf: metaFile),
+              let items = try? JSONDecoder().decode([Entry].self, from: data)
         else { return }
-        snippets = items
+        entries = items
     }
 }
 
-struct Snippet: Codable, Identifiable {
-    var id = UUID()
-    var name: String
-    var value: String
-}
+// MARK: - App Delegate
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    let store = SnippetStore()
+    private var appWindow: NSWindow?
+    let store = EntryStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let hc = NSHostingController(rootView: ContentView().environment(store))
+        let hc = NSHostingController(rootView: MenuBarView().environment(store))
         popover = NSPopover()
         popover.behavior = .transient
         popover.contentViewController = hc
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(
-            systemSymbolName: "doc.on.clipboard",
-            accessibilityDescription: "Save & See"
-        )
+        statusItem.button?.image = NSImage(systemSymbolName: "doc.on.clipboard",
+                                            accessibilityDescription: "Save & See")
         statusItem.button?.action = #selector(toggle)
         statusItem.button?.target = self
     }
@@ -74,7 +133,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
         }
     }
+
+    func openAppWindow() {
+        popover.performClose(nil)
+        if appWindow == nil {
+            let hc = NSHostingController(rootView: AppWindowView().environment(store))
+            let win = NSWindow(contentViewController: hc)
+            win.title = "Save & See"
+            win.styleMask = [.titled, .closable, .resizable, .miniaturizable]
+            win.setContentSize(NSSize(width: 720, height: 500))
+            win.minSize = NSSize(width: 560, height: 380)
+            win.center()
+            win.delegate = self
+            appWindow = win
+        }
+        NSApp.setActivationPolicy(.regular)
+        appWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        appWindow = nil
+        NSApp.setActivationPolicy(.accessory)
+    }
 }
+
+// MARK: - Entry Point
 
 @main
 struct Save_SeeApp: App {
